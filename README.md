@@ -1,11 +1,11 @@
-# GitHub Ping Keepalive – otello-web.onrender.com
+# GitHub Ping Keepalive – otello-web.onrender.com/core/wake/
 
-Questo repository contiene workflow GitHub Actions per monitorare il sito [otello-web.onrender.com](https://otello-web.onrender.com).
+Questo repository contiene workflow GitHub Actions per monitorare e mantenere attivo il sito [otello-web.onrender.com/core/wake/](https://otello-web.onrender.com/core/wake/).
 
 ## 🚀 Funzionalità
 
 - **Ping programmato**  
-  Il workflow esegue un ping al sito ogni 15 minuti dalle 07:30 alle 22:15, dal lunedì al sabato.  
+  Il workflow esegue un ping alla pagina `/core/wake/` ogni 15 minuti dalle 07:30 alle 22:15, dal lunedì al sabato.  
   La domenica è esclusa.
 
 - **Notifica Telegram**  
@@ -13,9 +13,9 @@ Questo repository contiene workflow GitHub Actions per monitorare il sito [otell
   Il bot Telegram è configurato tramite i secrets `TELEGRAM_TOKEN` e `TELEGRAM_CHAT_ID`.
 
 - **Log via artifact**  
-  Ogni esecuzione aggiunge una riga a `log.txt` con:
+  Ogni esecuzione genera un file `log.txt` con:
   - Timestamp
-  - URL del sito
+  - URL della pagina pingata
   - Codice di risposta HTTP (o `ERR` in caso di errore)  
 
   Il file `log.txt` viene salvato come artifact scaricabile dalla pagina **Actions → Run → Artifacts**.
@@ -33,7 +33,7 @@ Questo repository contiene workflow GitHub Actions per monitorare il sito [otell
    - `TELEGRAM_TOKEN` → il token del bot.
    - `TELEGRAM_CHAT_ID` → il numero chat.id.  
 4. **Verifica i workflow**:
-   - `ping.yml` → ping programmato + logging + notifica Telegram.
+   - `ping.yml` → ping programmato su `/core/wake/` + logging + notifica Telegram.
    - `keepalive.yml` → mantiene attivi i cronjob.
 
 ---
@@ -41,5 +41,5 @@ Questo repository contiene workflow GitHub Actions per monitorare il sito [otell
 ## 📌 Note
 
 - Gli artifacts sono scaricabili dalla sezione **Actions** di GitHub, non vengono committati nel repository.  
-- Puoi aggiungere altri siti duplicando lo step `curl` in `ping.yml`.  
+- Puoi aggiungere altri endpoint duplicando lo step `curl` in `ping.yml`.  
 - Il workflow è compatibile con le nuove versioni delle actions (`upload-artifact@v4`).  
