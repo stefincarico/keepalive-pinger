@@ -1,0 +1,17 @@
+name: Keepalive Workflow
+
+on:
+  schedule:
+    - cron: '0 0 * * 0'  # ogni domenica a mezzanotte
+  workflow_dispatch:
+
+jobs:
+  keepalive:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Keep workflow alive
+        uses: liskin/gh-workflow-keepalive@main
+        with:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          max_days_since_commit: 45
+          commit_message: "keepalive: refresh to prevent cron disable"
