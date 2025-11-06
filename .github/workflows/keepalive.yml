@@ -1,29 +1,17 @@
-name: Ping otello-web.onrender.com
+name: Keepalive Workflow
 
 on:
   schedule:
-    # ogni 15 minuti dalle 07:30 alle 22:15, da lunedì (1) a sabato (6)
-    - cron: '30,45 7 * * 1-6'         # 07:30 e 07:45
-    - cron: '0,15,30,45 8-21 * * 1-6' # 08:00–21:45 ogni 15 min
-    - cron: '0,15 22 * * 1-6'         # 22:00 e 22:15
-  workflow_dispatch:                   # avvio manuale per test
+    - cron: '0 0 * * 0'  # ogni domenica a mezzanotte
+  workflow_dispatch:
 
 jobs:
-  ping:
+  keepalive:
     runs-on: ubuntu-latest
     steps:
-      - name: Ping otello-web.onrender.com
-        id: ping_otello
-        run: |
-          set -o pipefail
-          curl -v https://otello-web.onrender.com 2>error.log
-
-      - name: Notify Telegram on failure
-        if: failure()
-        run: |
-          SITE="https://otello-web.onrender.com"
-          ERRORS=$(cat error.log 2>/dev/null || echo "Errore sconosciuto")
-          curl -s -X POST "https://api.telegram.org/bot${{ secrets.TELEGRAM_TOKEN }}/sendMessage" \
-            -d chat_id="${{ secrets.TELEGRAM_CHAT_ID }}" \
-            -d parse_mode="Markdown" \
-            -d text="⚠️ Ping fallito su *${SITE}*.\nDettagli:\n\`\`\`\n${ERRORS}\n\`\`\`"
+      - name: Keep workflow alive
+        uses: liskin/gh-workflow-keepalive@main
+        with:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          max_days_since_commit: 45
+          commit_message: "keepalive: refresh to prevent cron disable"
