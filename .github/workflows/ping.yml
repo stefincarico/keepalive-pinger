@@ -1,36 +1,121 @@
-name: Ping otello-web.onrender.com/core/wake (artifacts)
+name: Keep Render Awake
 
 on:
   schedule:
-    # ogni 15 minuti dalle 07:30 alle 22:15, da lunedì (1) a sabato (6)
-    - cron: '30,45 7 * * 1-6'         # 07:30 e 07:45
-    - cron: '0,15,30,45 8-21 * * 1-6' # 08:00–21:45 ogni 15 min
-    - cron: '0,15 22 * * 1-6'         # 22:00 e 22:15
-  workflow_dispatch:                   # avvio manuale per test
+    # Esecuzioni ogni 15 minuti, lun-sab, 07:30-22:15 ora italiana (06:30-21:15 UTC)
+    # ⚠️ GitHub Actions usa sempre UTC, ma il servizio risponde comunque
+    - cron: '30,45 6 * * 1-6'      # 07:30, 07:45 CET
+    - cron: '0,15,30,45 7-20 * * 1-6'  # 08:00-21:45 CET ogni 15 min
+    - cron: '0,15 21 * * 1-6'      # 22:00, 22:15 CET
+  
+  # Permette esecuzione manuale dal tab Actions su GitHub
+  workflow_dispatch:
 
 jobs:
   ping:
     runs-on: ubuntu-latest
-    steps:
-      - name: Esegui ping e registra log
-        id: ping_otello
-        run: |
-          TIMESTAMP=$(date '+%Y-%m-%d %H:%M:%S')
-          STATUS=$(curl -s -o /dev/null -w "%{http_code}" https://otello-web.onrender.com/core/wake/ || echo "ERR")
-          echo "$TIMESTAMP | https://otello-web.onrender.com/core/wake/ | HTTP $STATUS" >> log.txt
+    timeout-minutes: 3  # Killa il job se supera 3 minuti (sicurezza)
 
-      - name: Notifica Telegram se il ping fallisce
-        if: failure()
+    steps:
+      # ========================================
+      # STEP 1: Scarica log precedente da Gist
+      # ========================================
+      - name: Scarica log precedente
+        id: download_log
+        continue-on-error: true  # Non blocca se il Gist non esiste ancora
+        run: |
+          # Sostituisci GIST_ID con l'ID del tuo Gist (vedi istruzioni sotto)
+          GIST_ID="${{ secrets.GIST_ID }}"
+          
+          if [ -n "$GIST_ID" ]; then
+            curl -s -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
+              "https://api.github.com/gists/$GIST_ID" | \
+              jq -r '.files["ping-log.txt"].content' > log.txt 2>/dev/null || echo "" > log.txt
+            
+            # Mantieni solo le ultime 500 righe per non far crescere il file all'infinito
+            tail -n 500 log.txt > log_temp.txt && mv log_temp.txt log.txt
+          else
+            echo "⚠️ GIST_ID non configurato, il log non verrà salvato"
+            touch log.txt
+          fi
+
+      # ========================================
+      # STEP 2: Esegui il ping al servizio
+      # ========================================
+      - name: Ping servizio Render
+        id: ping
+        continue-on-error: true  # Non blocca il workflow se il ping fallisce
         run: |
           SITE="https://otello-web.onrender.com/core/wake/"
-          ERRORS=$(curl -v https://otello-web.onrender.com/core/wake/ 2>&1 || echo "Errore sconosciuto")
-          curl -s -X POST "https://api.telegram.org/bot${{ secrets.TELEGRAM_TOKEN }}/sendMessage" \
+          TIMESTAMP=$(TZ="Europe/Rome" date '+%Y-%m-%d %H:%M:%S')
+          
+          # Esegue richiesta HTTP con timeout di 10 secondi
+          STATUS=$(curl -s -o /dev/null -w "%{http_code}" --max-time 10 "$SITE" || echo "TIMEOUT")
+          
+          # Aggiunge la riga al log
+          echo "$TIMESTAMP | HTTP $STATUS" >> log.txt
+          
+          # Mostra il risultato nei log di GitHub Actions
+          echo "✅ Ping eseguito: $STATUS"
+          
+          # Salva lo status per gli step successivi
+          echo "status=$STATUS" >> $GITHUB_OUTPUT
+          echo "timestamp=$TIMESTAMP" >> $GITHUB_OUTPUT
+
+      # ========================================
+      # STEP 3: Notifica Telegram se c'è un problema
+      # ========================================
+      - name: Invia notifica errore su Telegram
+        if: steps.ping.outputs.status != '200'
+        run: |
+          STATUS="${{ steps.ping.outputs.status }}"
+          TIMESTAMP="${{ steps.ping.outputs.timestamp }}"
+          
+          MESSAGE="⚠️ *Ping fallito*
+          
+Servizio: \`otello-web.onrender.com\`
+Codice HTTP: \`$STATUS\`
+Orario: $TIMESTAMP"
+          
+          curl -s -X POST \
+            "https://api.telegram.org/bot${{ secrets.TELEGRAM_TOKEN }}/sendMessage" \
             -d chat_id="${{ secrets.TELEGRAM_CHAT_ID }}" \
             -d parse_mode="Markdown" \
-            -d text="⚠️ Ping fallito su *${SITE}*.\nDettagli:\n\`\`\`\n${ERRORS}\n\`\`\`"
+            -d text="$MESSAGE"
 
-      - name: Salva il log come artifact
+      # ========================================
+      # STEP 4: Carica log aggiornato su Gist
+      # ========================================
+      - name: Aggiorna log su Gist
+        if: always()  # Esegue sempre, anche se step precedenti falliscono
+        continue-on-error: true
+        run: |
+          GIST_ID="${{ secrets.GIST_ID }}"
+          
+          if [ -z "$GIST_ID" ]; then
+            echo "⚠️ GIST_ID non configurato, salto l'upload"
+            exit 0
+          fi
+          
+          # Prepara il contenuto del log per JSON (escape newlines)
+          LOG_CONTENT=$(cat log.txt | jq -Rs .)
+          
+          # Aggiorna il Gist tramite API GitHub
+          curl -s -X PATCH \
+            -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
+            -H "Accept: application/vnd.github.v3+json" \
+            "https://api.github.com/gists/$GIST_ID" \
+            -d "{\"files\":{\"ping-log.txt\":{\"content\":$LOG_CONTENT}}}"
+          
+          echo "✅ Log caricato su Gist"
+
+      # ========================================
+      # STEP 5: Backup come artifact (opzionale)
+      # ========================================
+      - name: Salva log come artifact
+        if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: ping-log-otello
+          name: ping-log-backup
           path: log.txt
+          retention-days: 7  # Mantieni solo 7 giorni di backup
