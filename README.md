@@ -1,4 +1,3 @@
-```markdown
 # 🚀 Render Keep-Alive System
 
 ![GitHub Actions](https://img.shields.io/badge/GitHub_Actions-Automated-2088FF?style=for-the-badge&logo=github-actions&logoColor=white)
