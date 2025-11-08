@@ -32,7 +32,7 @@ jobs:
             if [ -s log.txt ]; then
               echo "✅ Log scaricato: $(wc -l < log.txt) righe"
               # Mantieni solo le ultime 500 righe
-              tail -n 500 log.txt > log_temp.txt && mv log_temp.txt log.txt
+              tail -n 100 log.txt > log_temp.txt && mv log_temp.txt log.txt
             else
               echo "⚠️ Gist vuoto o non trovato, creo nuovo log"
               echo "# Log ping Render - Inizializzato $(TZ='Europe/Rome' date '+%Y-%m-%d %H:%M:%S')" > log.txt
