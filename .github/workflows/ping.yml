@@ -2,76 +2,70 @@ name: Keep Render Awake
 
 on:
   schedule:
-    # Esecuzioni ogni 15 minuti, lun-sab, 07:30-22:15 ora italiana (06:30-21:15 UTC)
-    # ⚠️ GitHub Actions usa sempre UTC, ma il servizio risponde comunque
-    - cron: '30,45 6 * * 1-6'      # 07:30, 07:45 CET
-    - cron: '0,15,30,45 7-20 * * 1-6'  # 08:00-21:45 CET ogni 15 min
-    - cron: '0,15 21 * * 1-6'      # 22:00, 22:15 CET
-  
-  # Permette esecuzione manuale dal tab Actions su GitHub
+    - cron: '30,45 6 * * 1-6'
+    - cron: '0,15,30,45 7-20 * * 1-6'
+    - cron: '0,15 21 * * 1-6'
   workflow_dispatch:
 
 jobs:
   ping:
     runs-on: ubuntu-latest
-    timeout-minutes: 3  # Killa il job se supera 3 minuti (sicurezza)
+    timeout-minutes: 3
 
     steps:
-      # ========================================
-      # STEP 1: Scarica log precedente da Gist
-      # ========================================
-      - name: Scarica log precedente
-        id: download_log
-        continue-on-error: true  # Non blocca se il Gist non esiste ancora
+      - name: Scarica log precedente da Gist
+        continue-on-error: true
         run: |
-          # Sostituisci GIST_ID con l'ID del tuo Gist (vedi istruzioni sotto)
           GIST_ID="${{ secrets.GIST_ID }}"
           
           if [ -n "$GIST_ID" ]; then
-            curl -s -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
-              "https://api.github.com/gists/$GIST_ID" | \
-              jq -r '.files["ping-log.txt"].content' > log.txt 2>/dev/null || echo "" > log.txt
+            echo "Scarico log da Gist $GIST_ID..."
             
-            # Mantieni solo le ultime 500 righe per non far crescere il file all'infinito
-            tail -n 500 log.txt > log_temp.txt && mv log_temp.txt log.txt
+            # Scarica il contenuto del Gist
+            RESPONSE=$(curl -s -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
+              "https://api.github.com/gists/$GIST_ID")
+            
+            # Estrai il contenuto del file
+            echo "$RESPONSE" | jq -r '.files["ping-log.txt"].content' > log.txt 2>/dev/null
+            
+            # Verifica se il download è riuscito
+            if [ -s log.txt ]; then
+              echo "✅ Log scaricato: $(wc -l < log.txt) righe"
+              # Mantieni solo le ultime 500 righe
+              tail -n 500 log.txt > log_temp.txt && mv log_temp.txt log.txt
+            else
+              echo "⚠️ Gist vuoto o non trovato, creo nuovo log"
+              echo "# Log ping Render - Inizializzato $(TZ='Europe/Rome' date '+%Y-%m-%d %H:%M:%S')" > log.txt
+            fi
           else
-            echo "⚠️ GIST_ID non configurato, il log non verrà salvato"
-            touch log.txt
+            echo "❌ GIST_ID non configurato"
+            echo "# Log ping Render - Inizializzato $(TZ='Europe/Rome' date '+%Y-%m-%d %H:%M:%S')" > log.txt
           fi
 
-      # ========================================
-      # STEP 2: Esegui il ping al servizio
-      # ========================================
       - name: Ping servizio Render
         id: ping
-        continue-on-error: true  # Non blocca il workflow se il ping fallisce
+        continue-on-error: true
         run: |
           SITE="https://otello-web.onrender.com/core/wake/"
           TIMESTAMP=$(TZ="Europe/Rome" date '+%Y-%m-%d %H:%M:%S')
           
-          # Esegue richiesta HTTP con timeout di 10 secondi
           STATUS=$(curl -s -o /dev/null -w "%{http_code}" --max-time 10 "$SITE" || echo "TIMEOUT")
           
-          # Aggiunge la riga al log
+          # Aggiungi al log
           echo "$TIMESTAMP | HTTP $STATUS" >> log.txt
           
-          # Mostra il risultato nei log di GitHub Actions
           echo "✅ Ping eseguito: $STATUS"
+          echo "📝 Log aggiornato: $(wc -l < log.txt) righe totali"
           
-          # Salva lo status per gli step successivi
           echo "status=$STATUS" >> $GITHUB_OUTPUT
           echo "timestamp=$TIMESTAMP" >> $GITHUB_OUTPUT
 
-      # ========================================
-      # STEP 3: Notifica Telegram se c'è un problema
-      # ========================================
       - name: Invia notifica errore su Telegram
         if: steps.ping.outputs.status != '200'
         run: |
           STATUS="${{ steps.ping.outputs.status }}"
           TIMESTAMP="${{ steps.ping.outputs.timestamp }}"
           
-          # Usa %0A per le newline in URL encoding
           MESSAGE="⚠️ *Ping fallito*%0A%0AServizio: \`otello-web.onrender.com\`%0ACodice HTTP: \`$STATUS\`%0AOrario: $TIMESTAMP"
           
           curl -s -X POST \
@@ -80,39 +74,41 @@ jobs:
             -d parse_mode="Markdown" \
             -d text="$MESSAGE"
 
-      # ========================================
-      # STEP 4: Carica log aggiornato su Gist
-      # ========================================
       - name: Aggiorna log su Gist
-        if: always()  # Esegue sempre, anche se step precedenti falliscono
+        if: always()
         continue-on-error: true
         run: |
           GIST_ID="${{ secrets.GIST_ID }}"
           
           if [ -z "$GIST_ID" ]; then
-            echo "⚠️ GIST_ID non configurato, salto l'upload"
+            echo "⚠️ GIST_ID non configurato"
             exit 0
           fi
           
-          # Prepara il contenuto del log per JSON (escape newlines)
+          echo "Carico log su Gist ($(wc -l < log.txt) righe)..."
+          
+          # Prepara JSON
           LOG_CONTENT=$(cat log.txt | jq -Rs .)
           
-          # Aggiorna il Gist tramite API GitHub
-          curl -s -X PATCH \
+          # Aggiorna Gist
+          RESPONSE=$(curl -s -X PATCH \
             -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
             -H "Accept: application/vnd.github.v3+json" \
             "https://api.github.com/gists/$GIST_ID" \
-            -d "{\"files\":{\"ping-log.txt\":{\"content\":$LOG_CONTENT}}}"
+            -d "{\"files\":{\"ping-log.txt\":{\"content\":$LOG_CONTENT}}}")
           
-          echo "✅ Log caricato su Gist"
+          # Verifica successo
+          if echo "$RESPONSE" | jq -e '.id' > /dev/null 2>&1; then
+            echo "✅ Log caricato su Gist con successo"
+          else
+            echo "❌ Errore caricamento Gist:"
+            echo "$RESPONSE" | jq -r '.message // "Errore sconosciuto"'
+          fi
 
-      # ========================================
-      # STEP 5: Backup come artifact (opzionale)
-      # ========================================
       - name: Salva log come artifact
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: ping-log-backup
           path: log.txt
-          retention-days: 7  # Mantieni solo 7 giorni di backup
+          retention-days: 7
