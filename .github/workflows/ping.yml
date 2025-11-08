@@ -22,7 +22,7 @@ jobs:
             echo "Scarico log da Gist $GIST_ID..."
             
             # Scarica il contenuto del Gist
-            RESPONSE=$(curl -s -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
+            RESPONSE=$(curl -s -H "Authorization: token ${{ secrets.GIST_TOKEN }}" \
               "https://api.github.com/gists/$GIST_ID")
             
             # Estrai il contenuto del file
