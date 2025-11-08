@@ -87,8 +87,9 @@ jobs:
           
           echo "Carico log su Gist ($(wc -l < log.txt) righe)..."
           
-          # Prepara JSON
-          LOG_CONTENT=$(cat log.txt | jq -Rs .)
+          # Prepara JSON rimuovendo eventuali righe vuote
+          LOG_CONTENT=$(grep -v '^$' log.txt | jq -Rs .)
+
           
           # Aggiorna Gist
           RESPONSE=$(curl -s -X PATCH \
