@@ -71,11 +71,8 @@ jobs:
           STATUS="${{ steps.ping.outputs.status }}"
           TIMESTAMP="${{ steps.ping.outputs.timestamp }}"
           
-          MESSAGE="⚠️ *Ping fallito*
-          
-Servizio: \`otello-web.onrender.com\`
-Codice HTTP: \`$STATUS\`
-Orario: $TIMESTAMP"
+          # Usa %0A per le newline in URL encoding
+          MESSAGE="⚠️ *Ping fallito*%0A%0AServizio: \`otello-web.onrender.com\`%0ACodice HTTP: \`$STATUS\`%0AOrario: $TIMESTAMP"
           
           curl -s -X POST \
             "https://api.telegram.org/bot${{ secrets.TELEGRAM_TOKEN }}/sendMessage" \
