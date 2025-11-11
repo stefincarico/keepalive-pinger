@@ -1,16 +1,21 @@
 name: Keep Render Awake
 
 on:
+  # Pianificazione del workflow:
+  # - Alle 6:30 e 6:45 (lun-sab)
+  # - Ogni 15 minuti dalle 7:00 alle 20:45 (lun-sab)
+  # - Alle 21:00 e 21:15 (lun-sab)
   schedule:
     - cron: '30,45 6 * * 1-6'
     - cron: '0,15,30,45 7-20 * * 1-6'
     - cron: '0,15 21 * * 1-6'
+  # Possibilità di avvio manuale
   workflow_dispatch:
 
 jobs:
   ping:
     runs-on: ubuntu-latest
-    timeout-minutes: 3
+    timeout-minutes: 3   # Timeout massimo per il job
 
     steps:
       - name: Scarica log precedente da Gist
@@ -21,19 +26,24 @@ jobs:
           if [ -n "$GIST_ID" ]; then
             echo "Scarico log da Gist $GIST_ID..."
             
+            # Recupera il contenuto del Gist tramite API GitHub
             RESPONSE=$(curl -s -H "Authorization: token ${{ secrets.GIST_TOKEN }}" \
               "https://api.github.com/gists/$GIST_ID")
             
+            # Estrae il contenuto del file ping-log.txt
             echo "$RESPONSE" | jq -r '.files["ping-log.txt"].content' > log.txt 2>/dev/null
             
+            # Se il log esiste, mantieni solo le ultime 100 righe
             if [ -s log.txt ]; then
               echo "✅ Log scaricato: $(wc -l < log.txt) righe"
               tail -n 100 log.txt > log_temp.txt && mv log_temp.txt log.txt
             else
+              # Se il Gist è vuoto o non trovato, inizializza nuovo log
               echo "⚠️ Gist vuoto o non trovato, creo nuovo log"
               echo "# Log ping Render - Inizializzato $(TZ='Europe/Rome' date '+%Y-%m-%d %H:%M:%S')" > log.txt
             fi
           else
+            # Se GIST_ID non è configurato, crea log locale
             echo "❌ GIST_ID non configurato"
             echo "# Log ping Render - Inizializzato $(TZ='Europe/Rome' date '+%Y-%m-%d %H:%M:%S')" > log.txt
           fi
@@ -46,32 +56,39 @@ jobs:
           TIMESTAMP=$(TZ="Europe/Rome" date '+%Y-%m-%d %H:%M:%S')
           
           RESPONSE_FILE="response.txt"
+          # Esegue ping al sito: salva risposta in file e cattura codice HTTP
           STATUS=$(curl -s -w "%{http_code}" --max-time 10 -o "$RESPONSE_FILE" "$SITE" || echo "TIMEOUT")
           
+          # Estratto dei primi 200 caratteri della risposta (per debug)
           if [ -s "$RESPONSE_FILE" ]; then
             RESPONSE_SNIPPET=$(head -c 200 "$RESPONSE_FILE" | tr '\n' ' ')
           else
             RESPONSE_SNIPPET="(nessun contenuto)"
           fi
           
+          # Scrive nel log timestamp, codice HTTP e snippet risposta
           echo "$TIMESTAMP | HTTP $STATUS | $RESPONSE_SNIPPET" >> log.txt
           
           echo "✅ Ping eseguito: $STATUS"
           echo "📝 Log aggiornato: $(wc -l < log.txt) righe totali"
           
+          # Esporta variabili per step successivi
           echo "status=$STATUS" >> $GITHUB_OUTPUT
           echo "timestamp=$TIMESTAMP" >> $GITHUB_OUTPUT
           echo "response=$RESPONSE_SNIPPET" >> $GITHUB_OUTPUT
 
       - name: Invia notifica errore su Telegram
+        # Notifica solo se il codice HTTP non è 200
         if: steps.ping.outputs.status != '200'
         run: |
           STATUS="${{ steps.ping.outputs.status }}"
           TIMESTAMP="${{ steps.ping.outputs.timestamp }}"
           RESPONSE="${{ steps.ping.outputs.response }}"
           
+          # Messaggio formattato in Markdown con dettagli errore
           MESSAGE="⚠️ *Ping fallito*%0A%0AServizio: \`otello-web.onrender.com\`%0ACodice HTTP: \`$STATUS\`%0AOrario: $TIMESTAMP%0A%0AContenuto: \`$RESPONSE\`"
           
+          # Invio messaggio tramite API Telegram
           curl -s -X POST \
             "https://api.telegram.org/bot${{ secrets.TELEGRAM_TOKEN }}/sendMessage" \
             -d chat_id="${{ secrets.TELEGRAM_CHAT_ID }}" \
@@ -91,14 +108,17 @@ jobs:
           
           echo "Carico log su Gist ($(wc -l < log.txt) righe)..."
           
+          # Prepara contenuto log in formato JSON (stringa raw)
           LOG_CONTENT=$(grep -v '^$' log.txt | jq -Rs .)
           
+          # Aggiorna file ping-log.txt nel Gist
           RESPONSE=$(curl -s -X PATCH \
             -H "Authorization: token ${{ secrets.GIST_TOKEN }}" \
             -H "Accept: application/vnd.github.v3+json" \
             "https://api.github.com/gists/$GIST_ID" \
             -d "{\"files\":{\"ping-log.txt\":{\"content\":$LOG_CONTENT}}}")
           
+          # Verifica successo aggiornamento
           if echo "$RESPONSE" | jq -e '.id' > /dev/null 2>&1; then
             echo "✅ Log caricato su Gist con successo"
           else
@@ -110,6 +130,6 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: ping-log-backup
-          path: log.txt
-          retention-days: 7
+          name: ping-log-backup     # Nome dell’artifact
+          path: log.txt             # File da salvare
+          retention-days: 7         # Durata di conservazione
