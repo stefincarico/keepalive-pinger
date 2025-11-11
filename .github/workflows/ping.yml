@@ -21,17 +21,13 @@ jobs:
           if [ -n "$GIST_ID" ]; then
             echo "Scarico log da Gist $GIST_ID..."
             
-            # Scarica il contenuto del Gist
             RESPONSE=$(curl -s -H "Authorization: token ${{ secrets.GIST_TOKEN }}" \
               "https://api.github.com/gists/$GIST_ID")
             
-            # Estrai il contenuto del file
             echo "$RESPONSE" | jq -r '.files["ping-log.txt"].content' > log.txt 2>/dev/null
             
-            # Verifica se il download è riuscito
             if [ -s log.txt ]; then
               echo "✅ Log scaricato: $(wc -l < log.txt) righe"
-              # Mantieni solo le ultime 500 righe
               tail -n 100 log.txt > log_temp.txt && mv log_temp.txt log.txt
             else
               echo "⚠️ Gist vuoto o non trovato, creo nuovo log"
@@ -49,24 +45,32 @@ jobs:
           SITE="https://otello-web.onrender.com/core/wake/"
           TIMESTAMP=$(TZ="Europe/Rome" date '+%Y-%m-%d %H:%M:%S')
           
-          STATUS=$(curl -s -o /dev/null -w "%{http_code}" --max-time 10 "$SITE" || echo "TIMEOUT")
+          RESPONSE_FILE="response.txt"
+          STATUS=$(curl -s -w "%{http_code}" --max-time 10 -o "$RESPONSE_FILE" "$SITE" || echo "TIMEOUT")
           
-          # Aggiungi al log
-          echo "$TIMESTAMP | HTTP $STATUS" >> log.txt
+          if [ -s "$RESPONSE_FILE" ]; then
+            RESPONSE_SNIPPET=$(head -c 200 "$RESPONSE_FILE" | tr '\n' ' ')
+          else
+            RESPONSE_SNIPPET="(nessun contenuto)"
+          fi
+          
+          echo "$TIMESTAMP | HTTP $STATUS | $RESPONSE_SNIPPET" >> log.txt
           
           echo "✅ Ping eseguito: $STATUS"
           echo "📝 Log aggiornato: $(wc -l < log.txt) righe totali"
           
           echo "status=$STATUS" >> $GITHUB_OUTPUT
           echo "timestamp=$TIMESTAMP" >> $GITHUB_OUTPUT
+          echo "response=$RESPONSE_SNIPPET" >> $GITHUB_OUTPUT
 
       - name: Invia notifica errore su Telegram
         if: steps.ping.outputs.status != '200'
         run: |
           STATUS="${{ steps.ping.outputs.status }}"
           TIMESTAMP="${{ steps.ping.outputs.timestamp }}"
+          RESPONSE="${{ steps.ping.outputs.response }}"
           
-          MESSAGE="⚠️ *Ping fallito*%0A%0AServizio: \`otello-web.onrender.com\`%0ACodice HTTP: \`$STATUS\`%0AOrario: $TIMESTAMP"
+          MESSAGE="⚠️ *Ping fallito*%0A%0AServizio: \`otello-web.onrender.com\`%0ACodice HTTP: \`$STATUS\`%0AOrario: $TIMESTAMP%0A%0AContenuto: \`$RESPONSE\`"
           
           curl -s -X POST \
             "https://api.telegram.org/bot${{ secrets.TELEGRAM_TOKEN }}/sendMessage" \
@@ -87,18 +91,14 @@ jobs:
           
           echo "Carico log su Gist ($(wc -l < log.txt) righe)..."
           
-          # Prepara JSON rimuovendo eventuali righe vuote
           LOG_CONTENT=$(grep -v '^$' log.txt | jq -Rs .)
-
           
-          # Aggiorna Gist
           RESPONSE=$(curl -s -X PATCH \
             -H "Authorization: token ${{ secrets.GIST_TOKEN }}" \
             -H "Accept: application/vnd.github.v3+json" \
             "https://api.github.com/gists/$GIST_ID" \
             -d "{\"files\":{\"ping-log.txt\":{\"content\":$LOG_CONTENT}}}")
           
-          # Verifica successo
           if echo "$RESPONSE" | jq -e '.id' > /dev/null 2>&1; then
             echo "✅ Log caricato su Gist con successo"
           else
