@@ -1,8 +1,7 @@
 name: Keep Render Awake
 
 on:
-  # Pianificazione del workflow: Ogni 10 minuti (24/7) per monitoraggio leggero.
-  # (Cronjob esterni gestiscono keep-alive; questo verifica e notifica anomalie ridotte.)
+  # Pianificazione del workflow: Ogni 15 minuti (7-21, lun-sab)
   schedule:
     - cron: '*/15 7-21 * * 1-6'
   # Avvio manuale per test
@@ -22,15 +21,9 @@ jobs:
           
           if [ -n "$GIST_ID" ]; then
             echo "Scarico log da Gist $GIST_ID..."
-            
-            # Recupera contenuto Gist via API GitHub
             RESPONSE=$(curl -s -H "Authorization: token ${{ secrets.GIST_TOKEN }}" \
               "https://api.github.com/gists/$GIST_ID")
-            
-            # Estrae ping-log.txt
             echo "$RESPONSE" | jq -r '.files["ping-log.txt"].content' > log.txt 2>/dev/null
-            
-            # Mantieni solo ultime 100 righe
             if [ -s log.txt ]; then
               echo "✅ Log scaricato: $(wc -l < log.txt) righe"
               tail -n 100 log.txt > log_temp.txt && mv log_temp.txt log.txt
@@ -51,7 +44,6 @@ jobs:
           TIMESTAMP=$(TZ="Europe/Rome" date '+%Y-%m-%d %H:%M:%S')
           
           RESPONSE_FILE="response.txt"
-          # Curl con header personalizzato
           INFO=$(curl -s -w "HTTP:%{http_code} TIME:%{time_total}\n" \
             --max-time 45 \
             -H "X-Source: GitHubAction" \
@@ -66,42 +58,39 @@ jobs:
             RESPONSE_SNIPPET="(nessun contenuto)"
           fi
           
-          # Nuovo: Calcola streak anomalie (conta ultime 3 righe con time >20 o status non-200)
           if [ -s log.txt ]; then
-            # Anomalia: time >20 o status in {4xx,5xx,TIMEOUT}
             FAIL_STREAK=$(tail -n 3 log.txt | grep -c "TIME.*>20\|HTTP \(4\|5\|TIMEOUT\)")
           else
             FAIL_STREAK=0
           fi
-          # Incrementa streak se anomalia corrente (time >20 o status non-200)
           if [[ "$TIME" > "20" ]] || [[ "$STATUS" != "200" && "$STATUS" != "TIMEOUT" ]]; then
             ((FAIL_STREAK++))
           fi
           
-          # Log con dettagli
           echo "$TIMESTAMP | HTTP $STATUS | TIME $TIME s | STREAK $FAIL_STREAK | $RESPONSE_SNIPPET" >> log.txt
           
           echo "✅ Ping: $STATUS (tempo: $TIME s, streak: $FAIL_STREAK)"
           echo "📝 Log aggiornato: $(wc -l < log.txt) righe"
           
-          # Esporta variabili (nuovo: streak)
+          # Esporta variabili (aggiunto anche source)
           echo "status=$STATUS" >> $GITHUB_OUTPUT
           echo "timestamp=$TIMESTAMP" >> $GITHUB_OUTPUT
           echo "response=$RESPONSE_SNIPPET" >> $GITHUB_OUTPUT
           echo "time=$TIME" >> $GITHUB_OUTPUT
           echo "streak=$FAIL_STREAK" >> $GITHUB_OUTPUT
+          echo "source=GitHubAction" >> $GITHUB_OUTPUT
 
       - name: Invia notifica errore su Telegram
         if: (steps.ping.outputs.status != '200') || ( (steps.ping.outputs.time > '20') && (steps.ping.outputs.streak > '2') )
         run: |
           MESSAGE="⚠️ *Ping anomalo* (streak: ${{ steps.ping.outputs.streak }})
-          Servizio: otello-web.onrender.com
-          Codice: ${{ steps.ping.outputs.status }}
-          Tempo: ${{ steps.ping.outputs.time }} s
-          Orario: ${{ steps.ping.outputs.timestamp }}
-          Source: ${{ steps.ping.outputs.source }}
-          Risposta: \`${{ steps.ping.outputs.response }}\`"
-      
+Servizio: otello-web.onrender.com
+Codice: ${{ steps.ping.outputs.status }}
+Tempo: ${{ steps.ping.outputs.time }} s
+Orario: ${{ steps.ping.outputs.timestamp }}
+Source: ${{ steps.ping.outputs.source }}
+Risposta: \`${{ steps.ping.outputs.response }}\`"
+
           curl -s -X POST \
             "https://api.telegram.org/bot${{ secrets.TELEGRAM_TOKEN }}/sendMessage" \
             -d chat_id="${{ secrets.TELEGRAM_CHAT_ID }}" \
@@ -109,30 +98,20 @@ jobs:
             -d text="$MESSAGE"
 
       - name: Aggiorna log su Gist
-        # Carica log aggiornato sul Gist (ora include streak).
         if: always()
         continue-on-error: true
         run: |
           GIST_ID="${{ secrets.GIST_ID }}"
-          
           if [ -z "$GIST_ID" ]; then
             echo "⚠️ GIST_ID non configurato"
             exit 0
           fi
-          
-          echo "Carico log su Gist ($(wc -l < log.txt) righe)..."
-          
-          # JSON raw per Gist
           LOG_CONTENT=$(grep -v '^$' log.txt | jq -Rs .)
-          
-          # Patch Gist
           RESPONSE=$(curl -s -X PATCH \
             -H "Authorization: token ${{ secrets.GIST_TOKEN }}" \
             -H "Accept: application/vnd.github.v3+json" \
             "https://api.github.com/gists/$GIST_ID" \
             -d "{\"files\":{\"ping-log.txt\":{\"content\":$LOG_CONTENT}}}")
-          
-          # Verifica
           if echo "$RESPONSE" | jq -e '.id' > /dev/null 2>&1; then
             echo "✅ Log caricato"
           else
@@ -140,7 +119,6 @@ jobs:
           fi
 
       - name: Salva log come artifact
-        # Artifact per debug (7 giorni).
         if: always()
         uses: actions/upload-artifact@v4
         with:
