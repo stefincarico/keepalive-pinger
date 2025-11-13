@@ -44,8 +44,6 @@ jobs:
           fi
 
       - name: Ping servizio Render
-        # Ping con cattura status HTTP e tempo totale.
-        # Timeout 45s per cold starts; logga tempo per streak check.
         id: ping
         continue-on-error: true
         run: |
@@ -53,12 +51,15 @@ jobs:
           TIMESTAMP=$(TZ="Europe/Rome" date '+%Y-%m-%d %H:%M:%S')
           
           RESPONSE_FILE="response.txt"
-          # Curl con output per HTTP code e time_total
-          INFO=$(curl -s -w "HTTP:%{http_code} TIME:%{time_total}\n" --max-time 45 -o "$RESPONSE_FILE" "$SITE" || echo "HTTP:TIMEOUT TIME:>45")
+          # Curl con header personalizzato
+          INFO=$(curl -s -w "HTTP:%{http_code} TIME:%{time_total}\n" \
+            --max-time 45 \
+            -H "X-Source: GitHubAction" \
+            -o "$RESPONSE_FILE" "$SITE" || echo "HTTP:TIMEOUT TIME:>45")
+          
           STATUS=$(echo "$INFO" | grep HTTP | cut -d: -f2 | tr -d ' ')
           TIME=$(echo "$INFO" | grep TIME | cut -d: -f2 | tr -d '\n')
           
-          # Snippet risposta per debug
           if [ -s "$RESPONSE_FILE" ]; then
             RESPONSE_SNIPPET=$(head -c 200 "$RESPONSE_FILE" | tr '\n' ' ')
           else
