@@ -92,20 +92,16 @@ jobs:
           echo "streak=$FAIL_STREAK" >> $GITHUB_OUTPUT
 
       - name: Invia notifica errore su Telegram
-        # Notifica solo su: status !=200 OPPURE (time >20s E streak >2).
-        # Questo filtra anomalie isolate, riducendo spam.
         if: (steps.ping.outputs.status != '200') || ( (steps.ping.outputs.time > '20') && (steps.ping.outputs.streak > '2') )
         run: |
-          STATUS="${{ steps.ping.outputs.status }}"
-          TIMESTAMP="${{ steps.ping.outputs.timestamp }}"
-          RESPONSE="${{ steps.ping.outputs.response }}"
-          TIME="${{ steps.ping.outputs.time }}"
-          STREAK="${{ steps.ping.outputs.streak }}"
-          
-          # Messaggio con streak per contesto
-          MESSAGE="⚠️ *Ping anomalo (streak: $STREAK)*%0A%0AServizio: \`otello-web.onrender.com\`%0ACodice HTTP: \`$STATUS\`%0ATempo risposta: \`$TIME s\`%0AOrario: $TIMESTAMP%0A%0AContenuto: \`$RESPONSE\`"
-          
-          # Invia via API Telegram
+          MESSAGE="⚠️ *Ping anomalo* (streak: ${{ steps.ping.outputs.streak }})
+          Servizio: otello-web.onrender.com
+          Codice: ${{ steps.ping.outputs.status }}
+          Tempo: ${{ steps.ping.outputs.time }} s
+          Orario: ${{ steps.ping.outputs.timestamp }}
+          Source: ${{ steps.ping.outputs.source }}
+          Risposta: \`${{ steps.ping.outputs.response }}\`"
+      
           curl -s -X POST \
             "https://api.telegram.org/bot${{ secrets.TELEGRAM_TOKEN }}/sendMessage" \
             -d chat_id="${{ secrets.TELEGRAM_CHAT_ID }}" \
